@@ -1,5 +1,3 @@
-import math
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,8 +19,8 @@ class RewardModel(nn.Module):
 
     def forward(self, x, a):
         """
-        x : (batch_size, hidden_state_size)
-        a : (batch_size,)
+        x : (batch_size, hidden_state_size) hidden state representing previously generated words.
+        a : (batch_size,) words submitted at current timestep.
         """
 
         a_embed = self.embedding(a)
@@ -77,17 +75,18 @@ class Rewarder:
             self.model.parameters(), self.learning_rate, self.momentum
         )
 
-    def compute_rewards_to_go(
-        self, trajectories, generator, roll_num=4, reward_gamma=1.0
-    ):
+    def compute_rewards_to_go(self, trajectories, generator, roll_num=4):
         """
         Compute reward for each partitial trajectory t:seq_length
         for all t 1:seq_length
 
-        trajectories: (batch_size, seq_len) type: int 
+        Parameters:
+            trajectories : (batch_size, seq_len) type: int 
+            generator : Generator
+            roll_num : int number of Monte Carlo estimates to compute roll-out estimate of value.
 
-        Returns
-        rewards_to_go : (num_batches, batch_size, seq_length)
+        Returns:
+            rewards_to_go : (num_batches, batch_size, seq_length)
         """
 
         init_shape = trajectories.shape
@@ -102,7 +101,6 @@ class Rewarder:
             #   using MCMC sampling
 
             current_traj = trajectories[:, 0 : (t + 1)]
-            # current_traj.shape = (batch_size, starting_seq_len))
             expected_reward = 0
             for k in range(roll_num):
                 rollouts, rollout_hidden_states = generator.generate(
@@ -114,9 +112,6 @@ class Rewarder:
                     decode=False,
                 )
 
-                # rollouts_hidden_states.shape =  (batch_size, ending_seq_len, hidden_dim)
-                # rollouts[0].shape = (batch_size, ending_seq_len)
-                # rewards.shape = (batch_size*seq_len, 1)
                 rewards = self.model(
                     rollout_hidden_states.view(-1, self.hidden_state_size),
                     rollouts[0].view(-1),
@@ -148,7 +143,11 @@ class Rewarder:
         """
         Perform one step of stochastic gradient descent for the Reward objective,
         as per equation (6) in https://arxiv.org/pdf/1804.11258.pdf.
-        real_batch : (batch_size, seq_len)
+        
+        Parameters:
+            real_batch : (batch_size, seq_len) Data from training set.
+            generator : Generator
+            generator_batch_size : int
         """
 
         # Compute reward for real sequences
@@ -157,7 +156,6 @@ class Rewarder:
         # Also store the actions taken at each timestep.
         real_batch_size = real_batch.shape[0]
         hidden_states_real = generator.get_hidden_state(real_batch)
-        # hidden_states_real.shape = real_batch_size, self.seq_len, self.embed_dim
 
         x_real = hidden_states_real.view(-1, self.hidden_state_size).cuda()
         a_real = real_batch.view(-1).cuda()
@@ -176,9 +174,6 @@ class Rewarder:
 
         actions_gen = actions_gen[0]
 
-        # reward_by_example = torch.zeros(generator_batch_size).cuda()
-        # log_w = np.zeros(generator_batch_size)
-
         # Get rewards as a function of example, by summing over the sequence but not the batch size.
         reward_by_example = self.model(
             hidden_states_gen.view(-1, self.hidden_state_size), actions_gen.view(-1),
@@ -189,7 +184,6 @@ class Rewarder:
 
         # (batch_size, seq_len, 1)
         indices = actions_gen.unsqueeze(-1)
-        # (batch_size, seq_len, 1)
         log_q = torch.gather(log_probs, 2, indices).sum(axis=1).cpu().data.numpy()
         log_w = reward_by_example.cpu().data.numpy() - log_q
 

@@ -7,6 +7,7 @@ from torch.distributions import Categorical
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
 
+
 def batched_index_select(t, dim, inds):
     res = []
 
@@ -18,6 +19,7 @@ def batched_index_select(t, dim, inds):
             res.append(t[i][inds[i]].cpu())
 
     return torch.stack(res).cuda()
+
 
 class Generator:
     def __init__(self, seq_len, str_map, clip_max_norm, num_decoder_train=2):
@@ -31,12 +33,8 @@ class Generator:
         ).cuda()
 
         # freeze transformer
-#        for i in range(self.model.config.n_layer - num_decoder_train):
-#            for param in self.model.transformer.h[i].parameters():
-#                param.requires_grad = False
-
         for param in self.model.transformer.parameters():
-             param.requires_grad = False
+            param.requires_grad = False
 
         # mod head for our coco vocab
         self.model.lm_head = nn.Linear(
@@ -68,6 +66,15 @@ class Generator:
         self, batch_size, num_batches, start_toks, inc_hidden_state, inc_probs, decode
     ):
         """
+        Generate text from generator.
+
+        Parameters:
+            batch_size : int
+            num_batches : int
+            start_toks : (batch_size, start_toks_seq_len)
+            inc_hidden_state : boolean Include hidden states of generated tokens.
+            inc_probs : boolean Include probabilities of all tokens at each timestep in sequence.
+            decode : map vocabulary indices to strings of readable text
         Returns:
             generated : (num_batches, batch_size, seq_len)
             h_states : (batch_size * num_batches, seq_len, hidden_state_size)
@@ -92,7 +99,6 @@ class Generator:
         ).cuda()
 
         # start token
-
         if start_toks is None:  # begin with <eos>
             tok = 50256 * torch.ones(batch_size * num_batches, dtype=torch.long).cuda()
             attn_mask = torch.ones(batch_size * num_batches, dtype=torch.long).cuda()
@@ -110,7 +116,6 @@ class Generator:
             prob, _, h_state = res[0], res[1], res[2][-1]
 
             # pick out most recent token (if inputted > 1 token)
-            # TODO: fix this for having other starts than beg token
             if len(prob.shape) == 3:
                 prob = batched_index_select(prob, 1, tok_mask)
                 h_state = batched_index_select(h_state, 1, tok_mask)
@@ -153,7 +158,7 @@ class Generator:
     # Gets hidden state for inputted data (for rewards).
     def get_hidden_state(self, batch):
         """
-        batch: (batch_size, seq_len) int indicating index in <TODO> vocabulary.
+        batch: (batch_size, seq_len) int indicating index in coco vocabulary.
         """
         self.model.eval()
 
@@ -168,9 +173,13 @@ class Generator:
             # turn into gpt2 vocab
             # str_map = [self.str_map[data[i]].tolist() for i in range(len(data))]
             if t == 0:
-                str_map = [[self.str_map[data[i].cpu()].tolist()] for i in range(len(data))]
+                str_map = [
+                    [self.str_map[data[i].cpu()].tolist()] for i in range(len(data))
+                ]
             else:
-                str_map = [self.str_map[data[i].cpu()].tolist() for i in range(len(data))]
+                str_map = [
+                    self.str_map[data[i].cpu()].tolist() for i in range(len(data))
+                ]
             gpt_map = self.tokenizer(str_map, padding=True, is_split_into_words=True)
             tok = torch.tensor(gpt_map["input_ids"]).cuda()
             attn_mask = torch.tensor(gpt_map["attention_mask"]).cuda()
@@ -187,35 +196,36 @@ class Generator:
     # fine tune new FC layer  using normal transformer opt & train data
     # https://huggingface.co/transformers/custom_datasets.html
     def pretrain_step(self, batch):
-         """
-         pretrain_step: one step of pretraining
+        """
+        One optimization step of pretraining.
 
-         param: batch 
-         """
-         self.model.train()
+        Parameters:
+            batch: (batch_size, seq_len) int indicating index in coco vocabulary.
+        """
+        self.model.train()
 
-         # Get data from batch
-         data, m_in, tok_mask = batch
+        # Get data from batch
+        data, m_in, tok_mask = batch
 
-         # Pass through model
-         prob = self.model(input_ids=m_in)[0]
-         prob = batched_index_select(prob, 1, tok_mask.bool())
+        # Pass through model
+        prob = self.model(input_ids=m_in)[0]
+        prob = batched_index_select(prob, 1, tok_mask.bool())
 
-         prob = F.softmax(prob, dim=-1).view(
-             -1, self.vocab_size
-         )
+        prob = F.softmax(prob, dim=-1).view(-1, self.vocab_size)
 
-         # compute loss & backprop
-         loss = self.loss(prob, data.flatten())
-         loss.backward()
-         self.optim.step()
+        # compute loss & backprop
+        loss = self.loss(prob, data.flatten())
+        loss.backward()
+        self.optim.step()
 
-         # ret loss
-         return loss
+        # ret loss
+        return loss
 
     def rl_train_step(self, rewarder, generator_batch_size, roll_num=4):
         """
-        Parameters
+        One step of entropy regularized maximum reward training with fixed rewarder.
+        
+        Parameters:
             batch_size: int
             rewarder: Rewarder
             roll_num: int
@@ -242,7 +252,6 @@ class Generator:
 
         # Find the log_probs pi_theta(a_t, s_t) for the actions in the trajectories.
         # Shape: (batch_size, seq_length)
-
         # Gather values along vocabulary axis.
         indices = actions.unsqueeze(-1)
         log_probs_trajectory = torch.gather(log_probs, 2, indices).squeeze()

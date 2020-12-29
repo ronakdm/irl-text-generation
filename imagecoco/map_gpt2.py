@@ -21,8 +21,8 @@ for i, s in enumerate(sentences):
 
     t = tk(words)["input_ids"]
     a = []
-    for l in t:
-        a.extend(l)
+    for token in t:
+        a.extend(token)
 
     a = torch.tensor(a + (34 - len(a)) * [50256])
     print(words)
@@ -37,7 +37,7 @@ for i, s in enumerate(sentences):
             curr += num_tok
 
             tok_mask[i][curr - 1] = 1
-        except:
+        except Exception:
             print(len(tok[i]))
 
 pickle.dump((tok, attn_mask, tok_mask), open("save/str_gpt_data.pkl", "wb"))

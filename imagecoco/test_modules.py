@@ -76,8 +76,19 @@ class Test:
         rewarder.train_step(trajectories, self.generator)
 
     def test_generator_rl_train_step(self):
+        rewarder = Rewarder(
+            self.seq_length,
+            self.real_batch_size,
+            self.gen_batch_size,
+            self.vocab_size,
+            self.hidden_state_size,
+            self.embed_dim,
+            self.mlp_hidden_size,
+            self.learning_rate,
+        )
+        generator_batch_size = 32
 
-        self.generator.rl_train_step(actions, rewards_to_go, log_probs, decay_weight)
+        self.generator.rl_train_step(self, rewarder, generator_batch_size)
 
     def test_dataloader(self):
         train_data = COCOImageCaptionsDataset("save/train_data.pkl")

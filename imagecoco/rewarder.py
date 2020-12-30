@@ -125,8 +125,8 @@ class Rewarder:
             # Compute the reward actually incurred by the trajectory.
             # (batch_size, remaining_seq_len)
             if self.baseline:
-                remaining_trajectory = trajectories[:, t:]
-                remaining_trajectory_hidden = trajectories_real[:, t:]
+                remaining_trajectory = trajectories[:, t:].cuda()
+                remaining_trajectory_hidden = trajectories_real[:, t:].cuda()
                 realized_reward = self.model(
                     remaining_trajectory_hidden.view(-1, self.hidden_state_size),
                     remaining_trajectory.view(-1),
